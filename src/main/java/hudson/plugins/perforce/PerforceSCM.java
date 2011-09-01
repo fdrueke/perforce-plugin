@@ -45,6 +45,7 @@ import net.sf.json.JSONObject;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
+import orga.cm.be4.Be4View;
 
 import javax.servlet.ServletException;
 import java.io.File;
@@ -227,6 +228,12 @@ public class PerforceSCM extends SCM {
     private String p4Charset = null;
     private String p4CommandCharset = null;
     
+    /**
+     * Be4 settings for polling and/or syncing
+     */
+    private boolean be4 = false;
+    private String be4Branch = null;
+    
     @DataBoundConstructor
     public PerforceSCM(
             String p4User,
@@ -348,6 +355,14 @@ public class PerforceSCM extends SCM {
         this.p4CommandCharset = Util.fixEmptyAndTrim(p4CommandCharset);
         this.excludedUsers = Util.fixEmptyAndTrim(excludedUsers);
         this.excludedFiles = Util.fixEmptyAndTrim(excludedFiles);
+        
+//        this.useBe4View = useBe4View;
+//        this.be4Branch = Util.fixEmptyAndTrim(be4Branch);
+        
+        
+//      newInstance.setUseBe4View(req.getParameter("p4.useBe4View") != null);
+//      //newInstance.setBe4Branch(Util.fixEmptyAndTrim(req.getParameter("p4.be4Branch")));
+//      newInstance.setBe4Branch(req.getParameter("be4Branch"));
     }
 
     /**
@@ -1194,8 +1209,20 @@ public class PerforceSCM extends SCM {
         // TODO If dontRenameClient==false, and updateView==false, user
         // has a lot of work to do to maintain the clientspecs.  Seems like
         // we could copy from a master clientspec to the slaves.
-
-        if (updateView || creatingNewWorkspace) {
+        
+        if (be4) {
+        	String p4Uri = "p4java://" + p4Port;
+        	try {
+        		log.println("setting P4 clientview via be4lib ...");
+        		PerforcePasswordEncryptor encryptor = new PerforcePasswordEncryptor();
+        		Be4View be4View = new Be4View(p4Uri, p4User, encryptor.decryptString(p4Passwd), be4Branch, p4Client);
+        		p4workspace.clearViews();
+        		p4workspace.addView(be4View.getFinalView());
+			} catch (Exception e) {
+				throw new AbortException("Error assembling perforce workspace via be4view.");
+			}
+        	
+        } else if (updateView || creatingNewWorkspace) {
             List<String> mappingPairs = parseProjectPath(projectPath, p4Client);
             if (!equalsProjectPath(mappingPairs, p4workspace.getViews())) {
                 log.println("Changing P4 Client View from:\n" + p4workspace.getViewsAsString());
@@ -1321,6 +1348,9 @@ public class PerforceSCM extends SCM {
             newInstance.setViewMask(Util.fixEmptyAndTrim(req.getParameter("p4.viewMask")));
             newInstance.setUseViewMaskForPolling(req.getParameter("p4.useViewMaskForPolling") != null);
             newInstance.setUseViewMaskForSyncing(req.getParameter("p4.useViewMaskForSyncing") != null);
+            
+            newInstance.setBe4(req.getParameter("p4.useBe4") != null);
+            newInstance.setBe4Branch(Util.fixEmptyAndTrim(req.getParameter("p4.be4Branch")));
             return newInstance;
         }
 
@@ -1486,6 +1516,32 @@ public class PerforceSCM extends SCM {
                         return FormValidation.error("Invalid depot path:" + path);
                 }
             }
+            return FormValidation.ok();
+        }
+        
+        public FormValidation doCheckBe4Branch(StaplerRequest req) {
+            String view = Util.fixEmptyAndTrim(req.getParameter("be4Branch"));
+            if (view != null) {
+                for (String path : view.replace("\r","").split("\n")) {
+                    if (!path.startsWith("/") || path.endsWith("/") || path.endsWith("..."))
+                        return FormValidation.error("'Remove the trailing characters from:" + path);
+                    if (!DEPOT_ONLY.matcher(path).matches() &&
+                        !DEPOT_ONLY_QUOTED.matcher(path).matches())
+                        return FormValidation.error("Invalid depot path:" + path);
+                 // TODO: check whether branch actually exists
+                 // TODO: warn if branch is configured in another jenkins job too
+                }
+            } else {
+            	return FormValidation.error("Mandatory field");
+            }
+            return FormValidation.ok();
+        }
+        
+        public FormValidation doCheckBe4AltView(StaplerRequest req) {
+            String view = Util.fixEmptyAndTrim(req.getParameter("be4AltView"));
+            
+            // TODO: check whether altview exists
+
             return FormValidation.ok();
         }
 
@@ -2215,5 +2271,21 @@ public class PerforceSCM extends SCM {
     public boolean supportsPolling() {
         return true;
     }
+
+	public boolean isBe4() {
+		return be4;
+	}
+
+	public void setBe4(boolean be4) {
+		this.be4 = be4;
+	}
+
+	public String getBe4Branch() {
+		return be4Branch;
+	}
+
+	public void setBe4Branch(String be4Branch) {
+		this.be4Branch = be4Branch;
+	}
 
 }
