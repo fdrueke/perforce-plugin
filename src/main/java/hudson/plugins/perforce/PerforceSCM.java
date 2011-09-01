@@ -82,6 +82,7 @@ public class PerforceSCM extends SCM {
     String p4Passwd;
     String p4Port;
     String p4Client;
+	String clientSpec;
     String projectPath;
     String projectOptions;
     String p4Label;
@@ -97,6 +98,10 @@ public class PerforceSCM extends SCM {
 
     private static final int MAX_CHANGESETS_ON_FIRST_BUILD = 50;
 
+	/**
+     * Use ClientSpec text file from depot to prepare the workspace view
+     */
+    boolean useClientSpec = false;
     /**
      * This is being removed, including it as transient to fix exceptions on startup.
      */
@@ -166,7 +171,7 @@ public class PerforceSCM extends SCM {
      * If true, the ,repository will be deleted before the checkout commences in addition to the workspace.
      */
     boolean wipeRepoBeforeBuild = false;
-    
+
     /**
      * If > 0, then will override the changelist we sync to for the first build.
      */
@@ -240,7 +245,6 @@ public class PerforceSCM extends SCM {
             String p4Passwd,
             String p4Client,
             String p4Port,
-            String projectPath,
             String projectOptions,
             String p4Exe,
             String p4SysRoot,
@@ -278,14 +282,6 @@ public class PerforceSCM extends SCM {
         this.projectOptions = (projectOptions != null)
                 ? projectOptions
                 : "noallwrite clobber nocompress unlocked nomodtime rmdir";
-
-        // Make it backwards compatible with the old way of specifying a label
-        Matcher m = Pattern.compile("(@\\S+)\\s*").matcher(projectPath);
-        if (m.find()) {
-            p4Label = m.group(1);
-            projectPath = projectPath.substring(0,m.start(1))
-                + projectPath.substring(m.end(1));
-        }
 
         if (this.p4Label != null && p4Label != null) {
             Logger.getLogger(PerforceSCM.class.getName()).warning(
@@ -355,14 +351,6 @@ public class PerforceSCM extends SCM {
         this.p4CommandCharset = Util.fixEmptyAndTrim(p4CommandCharset);
         this.excludedUsers = Util.fixEmptyAndTrim(excludedUsers);
         this.excludedFiles = Util.fixEmptyAndTrim(excludedFiles);
-        
-//        this.useBe4View = useBe4View;
-//        this.be4Branch = Util.fixEmptyAndTrim(be4Branch);
-        
-        
-//      newInstance.setUseBe4View(req.getParameter("p4.useBe4View") != null);
-//      //newInstance.setBe4Branch(Util.fixEmptyAndTrim(req.getParameter("p4.be4Branch")));
-//      newInstance.setBe4Branch(req.getParameter("be4Branch"));
     }
 
     /**
@@ -509,7 +497,7 @@ public class PerforceSCM extends SCM {
             return true;
         }
     }
-    
+
     /*
      * @see hudson.scm.SCM#checkout(hudson.model.AbstractBuild, hudson.Launcher, hudson.FilePath, hudson.model.BuildListener, java.io.File)
      */
@@ -580,9 +568,9 @@ public class PerforceSCM extends SCM {
 	                log.println("Could not clear workspace. See hudson.perforce.PerforceSCM logger for details.");
 	            }
 					forceSync = true;
-	        	} 
+	        	}
         }
-      
+
         //keep projectPath local so any modifications for slaves don't get saved
         String projectPath = substituteParameters(this.projectPath, build);
         String p4Label = substituteParameters(this.p4Label, build);
@@ -607,14 +595,14 @@ public class PerforceSCM extends SCM {
             if(!updateView){
                 projectPath = p4workspace.getTrimmedViewsAsString();
             }
-            
+
             //Get the list of changes since the last time we looked...
             String p4WorkspacePath = "//" + p4workspace.getName() + "/...";
             int lastChange = getLastChange((Run)build.getPreviousBuild());
             log.println("Last build changeset: " + lastChange);
 
             int newestChange = lastChange;
-            
+
             if(!disableAutoSync)
             {
                 List<Changelist> changes;
@@ -630,7 +618,12 @@ public class PerforceSCM extends SCM {
                     Counter counter = depot.getCounters().getCounter(counterName);
                     newestChange = counter.getValue();
                 }
-                if (lastChange == 0){
+                
+                if(build instanceof MatrixRun) {
+                    newestChange = getOrSetMatrixChangeSet(build, depot, newestChange, projectPath, log);
+                }
+
+                if (lastChange <= 0){
                     lastChange = newestChange - MAX_CHANGESETS_ON_FIRST_BUILD;
                     if (lastChange < 0){
                         lastChange = 0;
@@ -647,7 +640,7 @@ public class PerforceSCM extends SCM {
                     }
                     changes = depot.getChanges().getChangelistsFromNumbers(changeNumbersTo);
                 }
-                
+
 
                 if (changes.size() > 0) {
                     // Save the changes we discovered.
@@ -724,7 +717,7 @@ public class PerforceSCM extends SCM {
             if(doSaveProject){
                 build.getParent().save();
             }
-            
+
             // Add tagging action that enables the user to create a label
             // for this build.
             build.addAction(new PerforceTagAction(
@@ -760,6 +753,29 @@ public class PerforceSCM extends SCM {
             throw new IOException(
                     "Unable to get hostname from slave. " + e.getMessage());
         }
+    }
+
+    private synchronized int getOrSetMatrixChangeSet(AbstractBuild build, Depot depot, int newestChange, String projectPath, PrintStream log) {
+        int lastChange = 0;
+        //special consideration for matrix builds
+        if (build instanceof MatrixRun) {
+            log.println("This is a matrix run, trying to use change number from parent/siblings...");
+            AbstractBuild parentBuild = ((MatrixRun) build).getParentBuild();
+            if (parentBuild != null) {
+                int parentChange = getLastChange(parentBuild);
+                if (parentChange > 0) {
+                    //use existing changeset from parent
+                    log.println("Latest change from parent is: "+Integer.toString(parentChange));
+                    lastChange = parentChange;
+                } else {
+                    //no changeset on parent, set it for other
+                    //matrixruns to use
+                    log.println("No change number has been set by parent/siblings. Using latest.");
+                    parentBuild.addAction(new PerforceTagAction(build, depot, newestChange, projectPath, p4User));
+                }
+            }
+        }
+        return lastChange;
     }
 
     /**
@@ -866,7 +882,7 @@ public class PerforceSCM extends SCM {
             }
 
             return new PollingResult(baseline, repositoryState, change);
-            
+
         } catch (PerforceException e) {
             System.out.println("Problem: " + e.getMessage());
             logger.println("Caught Exception communicating with perforce." + e.getMessage());
@@ -919,7 +935,7 @@ public class PerforceSCM extends SCM {
 
     private SCMRevisionState getCurrentDepotRevisionState(Workspace p4workspace, AbstractProject project, Depot depot,
         PrintStream logger, int lastChangeNumber) throws IOException, InterruptedException, PerforceException {
-      
+
         int highestSelectedChangeNumber;
         List<Integer> changeNumbers;
 
@@ -932,7 +948,7 @@ public class PerforceSCM extends SCM {
             highestSelectedChangeNumber = counter.getValue();
             logger.println("Latest submitted change selected by named counter is " + highestSelectedChangeNumber);
             String root = "//" + p4workspace.getName() + "/...";
-            changeNumbers = depot.getChanges().getChangeNumbersInRange(p4workspace, lastChangeNumber+1, highestSelectedChangeNumber, root); 
+            changeNumbers = depot.getChanges().getChangeNumbersInRange(p4workspace, lastChangeNumber+1, highestSelectedChangeNumber, root);
         } else {
             // General Case
 
@@ -989,7 +1005,7 @@ public class PerforceSCM extends SCM {
      * Determines whether or not P4 changelist should be excluded and ignored by the polling trigger.
      * Exclusions include files, regex patterns of files, and/or changelists submitted by a specific user(s).
      *
-     * @param changelist the p4 changelist 
+     * @param changelist the p4 changelist
      * @return  True if changelist only contains user(s) and/or file(s) that are denoted to be excluded
      */
     private boolean isChangelistExcluded(Changelist changelist, PrintStream logger) {
@@ -997,7 +1013,7 @@ public class PerforceSCM extends SCM {
             return false;
         }
 
-        if (excludedUsers != null && !excludedUsers.trim().equals("")) 
+        if (excludedUsers != null && !excludedUsers.trim().equals(""))
         {
             List<String> users = Arrays.asList(excludedUsers.split("\n"));
 
@@ -1008,8 +1024,8 @@ public class PerforceSCM extends SCM {
 
             // no literal match, try regex
             Matcher matcher;
-            
-            for (String regex : users) 
+
+            for (String regex : users)
             {
                 try {
                     matcher = Pattern.compile(regex).matcher(changelist.getUser());
@@ -1024,14 +1040,14 @@ public class PerforceSCM extends SCM {
             }
         }
 
-        if (excludedFiles != null && !excludedFiles.trim().equals("")) 
+        if (excludedFiles != null && !excludedFiles.trim().equals(""))
         {
             List<String> files = Arrays.asList(excludedFiles.split("\n"));
             StringBuffer buff = null;
             Matcher matcher = null;
             boolean matchFound;
 
-            if (files.size() > 0 && changelist.getFiles().size() > 0) 
+            if (files.size() > 0 && changelist.getFiles().size() > 0)
             {
                 for (FileEntry f : changelist.getFiles()) {
                     if (!doesFilenameMatchAnyP4Pattern(f.getFilename(),files)) {
@@ -1183,21 +1199,23 @@ public class PerforceSCM extends SCM {
         if (lineEndValue != null && getAllLineEndChoices().contains(lineEndValue)){
             p4workspace.setLineEnd(lineEndValue);
         }
-        
+
         // Ensure that the root is appropriate (it might be wrong if the user
         // created it, or if we previously built on another node).
-        
+
         // Both launcher and workspace can be null if requiresWorkspaceForPolling returns true
         // So provide 'reasonable' default values.
         boolean isunix = true;
         if (launcher!= null)
         	isunix=launcher.isUnix();
-        
+
         String localPath = p4workspace.getRoot();
-        
+
         if (workspace!=null)
         	localPath = getLocalPathName(workspace, isunix);
-        
+        else if (localPath.trim().equals(""))
+                localPath = project.getRootDir().getAbsolutePath();
+
         if (!localPath.equals(p4workspace.getRoot()) && !dontChangeRoot && !dontUpdateClient) {
             log.println("Changing P4 Client Root to: " + localPath);
             forceSync = true;
@@ -1209,7 +1227,6 @@ public class PerforceSCM extends SCM {
         // TODO If dontRenameClient==false, and updateView==false, user
         // has a lot of work to do to maintain the clientspecs.  Seems like
         // we could copy from a master clientspec to the slaves.
-        
         if (be4) {
         	String p4Uri = "p4java://" + p4Port;
         	try {
@@ -1223,6 +1240,11 @@ public class PerforceSCM extends SCM {
 			}
         	
         } else if (updateView || creatingNewWorkspace) {
+			if (useClientSpec) {
+                log.println("Read ClientSpec from: " + clientSpec);
+                com.tek42.perforce.parse.File f = depot.getFile(clientSpec);
+                projectPath = f.read();
+            }
             List<String> mappingPairs = parseProjectPath(projectPath, p4Client);
             if (!equalsProjectPath(mappingPairs, p4workspace.getViews())) {
                 log.println("Changing P4 Client View from:\n" + p4workspace.getViewsAsString());
@@ -1344,6 +1366,14 @@ public class PerforceSCM extends SCM {
         @Override
         public SCM newInstance(StaplerRequest req, JSONObject formData) throws FormException {
             PerforceSCM newInstance = (PerforceSCM)super.newInstance(req, formData);
+			boolean useClientSpec = Boolean.parseBoolean(req.getParameter("p4.view"));
+            newInstance.setUseClientSpec(useClientSpec);
+            if (useClientSpec) {
+                newInstance.setClientSpec(req.getParameter("clientSpec"));
+            }
+            else {
+                newInstance.setProjectPath(req.getParameter("projectPath"));
+            }
             newInstance.setUseViewMask(req.getParameter("p4.useViewMask") != null);
             newInstance.setViewMask(Util.fixEmptyAndTrim(req.getParameter("p4.viewMask")));
             newInstance.setUseViewMaskForPolling(req.getParameter("p4.useViewMaskForPolling") != null);
@@ -1483,6 +1513,39 @@ public class PerforceSCM extends SCM {
                             "Error accessing perforce while checking counter: " + e.getLocalizedMessage());
                 }
             }
+            return FormValidation.ok();
+        }
+
+		/**
+         * Checks to see if the specified ClientSpec is valid.
+         */
+		public FormValidation doValidateClientSpec(StaplerRequest req) throws IOException, ServletException {
+            Depot depot = getDepotFromRequest(req);
+            if (depot == null) {
+                return FormValidation.error(
+                        "Unable to check ClientSpec against depot");
+            }
+
+            String clientspec = Util.fixEmptyAndTrim(req.getParameter("clientSpec"));
+            if (clientspec == null) {
+                return FormValidation.error("You must enter a path to a ClientSpec file");
+            }
+
+            if (!DEPOT_ONLY.matcher(clientspec).matches() &&
+                !DEPOT_ONLY_QUOTED.matcher(clientspec).matches()){
+                return FormValidation.error("Invalid depot path:" + clientspec);
+            }
+
+            try {
+                if (!depot.getStatus().exists(clientspec)) {
+                    return FormValidation.error("ClientSpec does not exist");
+                }
+            }
+            catch (PerforceException e) {
+                return FormValidation.error(
+                        "Error accessing perforce while checking ClientSpec: " + e.getLocalizedMessage());
+            }
+
             return FormValidation.ok();
         }
 
@@ -1751,6 +1814,34 @@ public class PerforceSCM extends SCM {
         return !pi.hasNext(); // equals iff there are no more pairs
     }
 
+	/**
+     * @return the path to the ClientSpec
+     */
+    public String getClientSpec() {
+        return clientSpec;
+    }
+
+    /**
+     * @param path the path to the ClientSpec
+     */
+    public void setClientSpec(String clientSpec) {
+        this.clientSpec = clientSpec;
+    }
+
+	/**
+     * @return True if we are using a ClientSpec file to setup the workspace view
+     */
+    public boolean isUseClientSpec() {
+        return useClientSpec;
+    }
+
+	/**
+     * @param useClientSpec True if a ClientSpec file should be used to setup workspace view, False otherwise
+     */
+    public void setUseClientSpec(boolean useClientSpec) {
+        this.useClientSpec = useClientSpec;
+    }
+
     /**
      * @return the projectPath
      */
@@ -1762,6 +1853,13 @@ public class PerforceSCM extends SCM {
      * @param projectPath the projectPath to set
      */
     public void setProjectPath(String projectPath) {
+		// Make it backwards compatible with the old way of specifying a label
+        Matcher m = Pattern.compile("(@\\S+)\\s*").matcher(projectPath);
+        if (m.find()) {
+            p4Label = m.group(1);
+            projectPath = projectPath.substring(0,m.start(1))
+                + projectPath.substring(m.end(1));
+        }
         this.projectPath = projectPath;
     }
 
@@ -2131,7 +2229,7 @@ public class PerforceSCM extends SCM {
         this.disableSyncOnly = disableSyncOnly;
 	}
 
-    public String getExcludedUsers() { 
+    public String getExcludedUsers() {
         return excludedUsers;
     }
 
