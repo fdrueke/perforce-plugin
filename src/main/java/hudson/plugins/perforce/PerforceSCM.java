@@ -101,7 +101,7 @@ public class PerforceSCM extends SCM {
 	/**
      * Use ClientSpec text file from depot to prepare the workspace view
      */
-    boolean useClientSpec = false;
+    //boolean useClientSpec = false;
     /**
      * This is being removed, including it as transient to fix exceptions on startup.
      */
@@ -236,10 +236,14 @@ public class PerforceSCM extends SCM {
     /**
      * Be4 settings for polling and/or syncing
      */
-    private boolean be4 = false;
+    //private boolean be4 = false;
     private String be4Branch = null;
+    private String be4AltView = null;
     
-    @DataBoundConstructor
+    private String viewType = null;
+    
+
+	@DataBoundConstructor
     public PerforceSCM(
             String p4User,
             String p4Passwd,
@@ -1227,12 +1231,18 @@ public class PerforceSCM extends SCM {
         // TODO If dontRenameClient==false, and updateView==false, user
         // has a lot of work to do to maintain the clientspecs.  Seems like
         // we could copy from a master clientspec to the slaves.
-        if (be4) {
+        if (viewType.equals("be4")) {
         	String p4Uri = "p4java://" + p4Port;
         	try {
+        		Be4View be4View;
+        		
         		log.println("setting P4 clientview via be4lib ...");
         		PerforcePasswordEncryptor encryptor = new PerforcePasswordEncryptor();
-        		Be4View be4View = new Be4View(p4Uri, p4User, encryptor.decryptString(p4Passwd), be4Branch, p4Client);
+        		if (be4AltView != null) {
+        			be4View = new Be4View(p4Uri, p4User, encryptor.decryptString(p4Passwd), be4Branch, p4Client, be4AltView);
+        		} else {
+        			be4View = new Be4View(p4Uri, p4User, encryptor.decryptString(p4Passwd), be4Branch, p4Client);
+        		}
         		p4workspace.clearViews();
         		p4workspace.addView(be4View.getFinalView());
 			} catch (Exception e) {
@@ -1240,7 +1250,7 @@ public class PerforceSCM extends SCM {
 			}
         	
         } else if (updateView || creatingNewWorkspace) {
-			if (useClientSpec) {
+			if (viewType.equals("clientspec")) {
                 log.println("Read ClientSpec from: " + clientSpec);
                 com.tek42.perforce.parse.File f = depot.getFile(clientSpec);
                 projectPath = f.read();
@@ -1366,12 +1376,14 @@ public class PerforceSCM extends SCM {
         @Override
         public SCM newInstance(StaplerRequest req, JSONObject formData) throws FormException {
             PerforceSCM newInstance = (PerforceSCM)super.newInstance(req, formData);
-			boolean useClientSpec = Boolean.parseBoolean(req.getParameter("p4.view"));
-            newInstance.setUseClientSpec(useClientSpec);
-            if (useClientSpec) {
+            newInstance.setViewType(req.getParameter("p4.view"));
+            
+            if (newInstance.getViewType().equals("clientspec")) {
                 newInstance.setClientSpec(req.getParameter("clientSpec"));
-            }
-            else {
+            } else if (newInstance.getViewType().equals("be4")) {
+                newInstance.setBe4Branch(Util.fixEmptyAndTrim(req.getParameter("p4.be4Branch")));
+                newInstance.setBe4AltView(Util.fixEmptyAndTrim(req.getParameter("p4.be4AltView")));
+            } else {
                 newInstance.setProjectPath(req.getParameter("projectPath"));
             }
             newInstance.setUseViewMask(req.getParameter("p4.useViewMask") != null);
@@ -1379,8 +1391,6 @@ public class PerforceSCM extends SCM {
             newInstance.setUseViewMaskForPolling(req.getParameter("p4.useViewMaskForPolling") != null);
             newInstance.setUseViewMaskForSyncing(req.getParameter("p4.useViewMaskForSyncing") != null);
             
-            newInstance.setBe4(req.getParameter("p4.useBe4") != null);
-            newInstance.setBe4Branch(Util.fixEmptyAndTrim(req.getParameter("p4.be4Branch")));
             return newInstance;
         }
 
@@ -1826,20 +1836,6 @@ public class PerforceSCM extends SCM {
      */
     public void setClientSpec(String clientSpec) {
         this.clientSpec = clientSpec;
-    }
-
-	/**
-     * @return True if we are using a ClientSpec file to setup the workspace view
-     */
-    public boolean isUseClientSpec() {
-        return useClientSpec;
-    }
-
-	/**
-     * @param useClientSpec True if a ClientSpec file should be used to setup workspace view, False otherwise
-     */
-    public void setUseClientSpec(boolean useClientSpec) {
-        this.useClientSpec = useClientSpec;
     }
 
     /**
@@ -2370,20 +2366,48 @@ public class PerforceSCM extends SCM {
         return true;
     }
 
-	public boolean isBe4() {
-		return be4;
+	
+
+    /**
+	 * @return the viewType
+	 */
+	public String getViewType() {
+		return viewType;
 	}
 
-	public void setBe4(boolean be4) {
-		this.be4 = be4;
+	/**
+	 * @param viewType the viewType to set
+	 */
+	public void setViewType(String viewType) {
+		this.viewType = viewType;
 	}
 
+	/**
+	 * @return the be4Branch
+	 */
 	public String getBe4Branch() {
 		return be4Branch;
 	}
 
+	/**
+	 * @param be4Branch the be4Branch to set
+	 */
 	public void setBe4Branch(String be4Branch) {
 		this.be4Branch = be4Branch;
+	}
+
+	/**
+	 * @return the be4AltView
+	 */
+	public String getBe4AltView() {
+		return be4AltView;
+	}
+
+	/**
+	 * @param be4AltView the be4AltView to set
+	 */
+	public void setBe4AltView(String be4AltView) {
+		this.be4AltView = be4AltView;
 	}
 
 }

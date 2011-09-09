@@ -40,18 +40,6 @@
         <f:checkbox field="updateView" default="true" value="True"/>
       </f:entry>
       
-	  <f:optionalBlock name="p4.useBe4" field="useBe4"
-	                   checked="${instance.be4}"
-	                   title="Let be4 manage clientview"
-	                   help="/plugin/perforce/help/useBe4View.html">
-	     <f:entry title="Be4 Branch" help="/plugin/perforce/help/be4Branch.html">
-	       <f:textbox name="p4.be4Branch"  value="${instance.be4Branch}" checkUrl="'${rootURL}/scm/PerforceSCM/checkBe4Branch?be4Branch='+escape(this.value)"/>
-	     </f:entry>
-	     <f:entry title="Alternative clientview" help="/plugin/perforce/help/be4AltView.html">
-	       <f:textbox name="p4.be4AltView"  value="${instance.be4AltView}" checkUrl="'${rootURL}/scm/PerforceSCM/checkBe4AltView?be4AltView='+escape(this.value)"/>
-	     </f:entry>
-	  </f:optionalBlock>
-      
       <f:entry title="Clean Workspace Before Each Build" help="/plugin/perforce/help/wipeBeforeBuild.html">
         <f:checkbox field="wipeBeforeBuild" default="false" value="False"/>
       </f:entry>
@@ -62,16 +50,24 @@
 
       <f:entry title="View">
         <table width="100%">
-          <f:radioBlock name="p4.view" title="ClientSpec" value="true" checked="${instance.useClientSpec}" help="/plugin/perforce/help/clientSpec.html">
+          <f:radioBlock name="p4.view" title="ClientSpec" value="clientspec" checked="${instance.viewType=='clientspec'}" help="/plugin/perforce/help/clientSpec.html">
             <f:entry>
               <f:textbox name="clientSpec" field="clientSpec"
               checkUrl="'${rootURL}/scm/PerforceSCM/validateClientSpec?port='+escape(this.form.elements['p4Port'].value)+'&amp;exe='+escape(this.form.elements['p4Exe'].value)+'&amp;user='+escape(this.form.elements['p4User'].value)+'&amp;pass='+escape(this.form.elements['p4Passwd'].value)+'&amp;client='+escape(this.form.elements['p4Client'].value)+'&amp;clientSpec='+escape(this.form.elements['clientSpec'].value)"/>
             </f:entry>
           </f:radioBlock>
-          <f:radioBlock name="p4.view" title="Mappings" value="false" checked="${!instance.useClientSpec}" help="/plugin/perforce/help/projectPath.html">
+          <f:radioBlock name="p4.view" title="Mappings" value="mappings" checked="${instance.viewType=='mappings'}" help="/plugin/perforce/help/projectPath.html">
             <f:entry>
               <f:textarea name="projectPath" field="projectPath" />
             </f:entry>
+          </f:radioBlock>
+          <f:radioBlock name="p4.view" title="Be4" value="be4" checked="${instance.viewType=='be4'}" help="/plugin/perforce/help/be4.html">
+	    	<f:entry title="Be4 Branch" help="/plugin/perforce/help/be4Branch.html">
+		      <f:textbox name="p4.be4Branch"  value="${instance.be4Branch}" checkUrl="'${rootURL}/scm/PerforceSCM/checkBe4Branch?be4Branch='+escape(this.value)"/>
+		    </f:entry>
+		    <f:entry title="Alternative clientview" help="/plugin/perforce/help/be4AltView.html">
+		      <f:textbox name="p4.be4AltView"  value="${instance.be4AltView}" checkUrl="'${rootURL}/scm/PerforceSCM/checkBe4AltView?be4AltView='+escape(this.value)"/>
+		    </f:entry>
           </f:radioBlock>
         </table>
       </f:entry>
