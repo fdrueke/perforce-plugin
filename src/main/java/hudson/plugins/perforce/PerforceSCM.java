@@ -1234,21 +1234,14 @@ public class PerforceSCM extends SCM {
         if (viewType.equals("be4")) {
         	String p4Uri = "p4java://" + p4Port;
         	try {
-        		Be4View be4View;
-        		
-        		log.println("setting P4 clientview via be4lib ...");
+        		log.println("Setting P4 clientview via be4lib ...");
         		PerforcePasswordEncryptor encryptor = new PerforcePasswordEncryptor();
-        		if (be4AltView != null) {
-        			be4View = new Be4View(p4Uri, p4User, encryptor.decryptString(p4Passwd), be4Branch, p4Client, be4AltView);
-        		} else {
-        			be4View = new Be4View(p4Uri, p4User, encryptor.decryptString(p4Passwd), be4Branch, p4Client);
-        		}
+        		Be4View be4View = new Be4View(p4Uri, p4User, encryptor.decryptString(p4Passwd), be4Branch, p4Client, be4AltView);
         		p4workspace.clearViews();
         		p4workspace.addView(be4View.getFinalView());
 			} catch (Exception e) {
 				throw new AbortException("Error assembling perforce workspace via be4view.");
 			}
-        	
         } else if (updateView || creatingNewWorkspace) {
 			if (viewType.equals("clientspec")) {
                 log.println("Read ClientSpec from: " + clientSpec);
